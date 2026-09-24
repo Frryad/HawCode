@@ -1,0 +1,91 @@
+{
+  "name": "hawhost-server",
+  "productName": "HawHost",
+  "version": "2.0.0",
+  "author": "HawCode",
+  "description": "Turn a Windows PC into a self-hosted web server with free Dynamic DNS — no tunnels, no cloud.",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "app": "concurrently -k -n ui,app \"vite\" \"wait-on tcp:127.0.0.1:5174 && electron . --dev\"",
+    "start": "electron .",
+    "daemon": "node daemon/daemon.js --verbose",
+    "build": "vite build",
+    "icons": "node scripts/make-icons.js",
+    "test": "node --test test/server.test.js",
+    "dist": "vite build && electron-builder --win --x64",
+    "dist:dir": "vite build && electron-builder --win --x64 --dir"
+  },
+  "dependencies": {
+    "node-forge": "^1.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.1.2",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "lucide-react": "^0.475.0",
+    "postcss": "^8.5.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "com.hawcode.hawhost",
+    "productName": "HawHost",
+    "copyright": "HawCode",
+    "asar": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "backend/**",
+      "daemon/**",
+      "electron/**",
+      "dist/**",
+      "assets/**",
+      "default-sites/**",
+      "config/**",
+      "docs/**",
+      "scripts/*.ps1",
+      "scripts/*.bat",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": true,
+      "executableName": "HawHost"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HawHost",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "include": "build/installer.nsh",
+      "artifactName": "HawHost-Setup-${version}.exe"
+    }
+  }
+}

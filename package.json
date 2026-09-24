@@ -1,0 +1,52 @@
+{
+  "name": "hawcode-pc",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run dev",
+    "kill-ports": "powershell -Command \"@(5173,3000,3001,3002,3003,3004,3005,3006,3007,3008,3009,3010) | ForEach-Object { (Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } }; Write-Output 'Ports cleared'\"",
+    "vite": "vite",
+    "dev": "npm run kill-ports && concurrently -k \"npm run vite\" \"npm run electron\"",
+    "electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron . --dev",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "autoprefixer": "^10.6.1",
+    "chokidar": "^5.0.0",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^44.4.3",
+    "express": "^5.2.1",
+    "local-ip-url": "^1.0.11",
+    "lucide-react": "^1.47.0",
+    "monaco-editor": "^0.56.0",
+    "postcss": "^8.5.28",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "tailwindcss": "^4.3.3",
+    "wait-on": "^9.1.0"
+  },
+  "optionalDependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "vite": "^8.3.0"
+  }
+}

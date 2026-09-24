@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HawCode — shared folder</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: rgba(255,255,255,0.1);
+    --text: #e6edf3; --dim: #8b949e; --accent: #6366f1; --good: #34d399; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--panel); flex-shrink: 0;
+  }
+  header strong { font-size: 14px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
+  .dot.on { background: var(--good); }
+  .spacer { flex: 1; }
+  .muted { color: var(--dim); font-size: 12px; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #handshake { padding: 28px; max-width: 720px; margin: 0 auto; overflow-y: auto; }
+  h1 { font-size: 19px; margin: 0 0 6px; }
+  ol { padding-left: 20px; color: var(--dim); font-size: 13px; }
+  ol li { margin-bottom: 4px; }
+  textarea, #editor {
+    width: 100%; background: #0d1117; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    resize: none;
+  }
+  #reply { height: 110px; word-break: break-all; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 16px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.ghost { background: rgba(255,255,255,0.06); }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  #tree {
+    width: 260px; border-right: 1px solid var(--line); overflow: auto; padding: 8px; flex-shrink: 0;
+    background: var(--panel);
+  }
+  #tree div {
+    padding: 3px 8px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; font-size: 13px;
+  }
+  #tree div:hover { background: rgba(255,255,255,0.06); }
+  #tree div.sel { background: rgba(99,102,241,0.25); }
+  #tree div.dir { color: var(--dim); cursor: default; font-weight: 600; }
+  #pane { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 10px; gap: 8px; }
+  #editor { flex: 1; min-height: 0; line-height: 1.6; }
+  .note {
+    padding: 10px 12px; border-radius: 8px; font-size: 12px; margin-top: 14px;
+    background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25); color: #fde68a;
+  }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot" id="dot"></span>
+  <strong id="title">HawCode</strong>
+  <span class="muted" id="status">starting…</span>
+  <span class="spacer"></span>
+  <span class="muted" id="route"></span>
+</header>
+
+<main>
+  <section id="handshake">
+    <h1>Connect to <span id="folderName">the shared folder</span></h1>
+    <ol>
+      <li>Copy the reply code below.</li>
+      <li>Send it back to whoever sent you this file, the same way they sent it.</li>
+      <li>They paste it into HawCode, and this page connects. Keep this tab open.</li>
+    </ol>
+    <div class="row" style="margin-top:16px"><strong style="font-size:13px">Your reply code</strong></div>
+    <textarea id="reply" readonly>working out your address…</textarea>
+    <div class="row">
+      <button id="copy" disabled>Copy reply code</button>
+      <span class="muted" id="replyHint"></span>
+    </div>
+    <div class="note">
+      This page talks straight to your friend's computer. The folder is served by
+      their machine, so it is only reachable while they have HawCode open.
+    </div>
+  </section>
+
+  <nav id="tree" class="hide"></nav>
+  <section id="pane" class="hide">
+    <div class="row" style="margin:0">
+      <strong id="openPath" style="font-size:13px">No file open</strong>
+      <span class="spacer"></span>
+      <span class="muted" id="saveState"></span>
+      <button id="save" disabled>Save</button>
+    </div>
+    <textarea id="editor" spellcheck="false" disabled></textarea>
+  </section>
+</main>
+
+<script>
+/*__WIRE__*/
+</script>
+
+<script>
+'use strict';
+
+/**
+ * The standalone client a friend gets when they do not have HawCode installed.
+ *
+ * One file, opened straight from disk, with the invite baked in. It speaks the
+ * same framed protocol as the desktop app over the same data channel — just
+ * with a plain textarea where the desktop has Monaco, because this file has to
+ * stay small enough to send through a chat app.
+ */
+
+var INVITE = /*__INVITE__*/ null;
+
+var pc = null;
+var channel = null;
+var nextId = 1;
+var waiting = new Map();
+var currentPath = null;
+var dirty = false;
+
+var el = function (id) { return document.getElementById(id); };
+
+function setStatus(text, connected) {
+  el('status').textContent = text;
+  el('dot').classList.toggle('on', Boolean(connected));
+}
+
+function toBase64Url(bytes) {
+  var binary = '';
+  for (var i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Match the host's codec. Gzip where the browser has CompressionStream, plain
+ * otherwise — the HAW1/HAW0 prefix tells the host which it is looking at.
+ */
+async function encodeReply(payload) {
+  var json = new TextEncoder().encode(JSON.stringify(payload));
+  if (typeof CompressionStream === 'function') {
+    try {
+      var stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+      var packed = new Uint8Array(await new Response(stream).arrayBuffer());
+      return 'HAW1-' + toBase64Url(packed);
+    } catch (error) {
+      // Fall through to the uncompressed form.
+    }
+  }
+  return 'HAW0-' + toBase64Url(json);
+}
+
+function send(message) {
+  if (!channel || channel.readyState !== 'open') return;
+  var frames = encodeFrames(message);
+  for (var i = 0; i < frames.length; i += 1) channel.send(frames[i]);
+}
+
+function request(op, args) {
+  return new Promise(function (resolve) {
+    var id = nextId;
+    nextId += 1;
+    waiting.set(id, resolve);
+    send({ k: 'req', id: id, op: op, args: args || {} });
+  });
+}
+
+// ------------------------------------------------------------------ file tree
+
+function renderTree(nodes, container, depth) {
+  nodes.forEach(function (node) {
+    var row = document.createElement('div');
+    row.style.paddingLeft = (6 + depth * 12) + 'px';
+    row.textContent = node.name;
+    if (node.type === 'directory') {
+      row.className = 'dir';
+      container.appendChild(row);
+      renderTree(node.children || [], container, depth + 1);
+      return;
+    }
+    row.dataset.path = node.path;
+    row.onclick = function () { openFile(node.path); };
+    container.appendChild(row);
+  });
+}
+
+async function refreshTree() {
+  var reply = await request('tree');
+  var container = el('tree');
+  container.innerHTML = '';
+  if (Array.isArray(reply.payload)) renderTree(reply.payload, container, 0);
+  markSelected();
+}
+
+function markSelected() {
+  Array.prototype.forEach.call(el('tree').children, function (row) {
+    row.classList.toggle('sel', row.dataset.path === currentPath);
+  });
+}
+
+async function openFile(path) {
+  if (dirty && !confirm('Discard unsaved changes to ' + currentPath + '?')) return;
+  var reply = await request('read', { path: path });
+  var body = reply.payload || {};
+  currentPath = path;
+  el('openPath').textContent = path;
+  markSelected();
+  if (body.error) {
+    el('editor').value = '';
+    el('editor').disabled = true;
+    el('saveState').textContent = body.error;
+    return;
+  }
+  if (body.binary) {
+    el('editor').value = '';
+    el('editor').disabled = true;
+    el('saveState').textContent = 'Binary file — not editable here';
+    el('save').disabled = true;
+    return;
+  }
+  el('editor').value = body.content || '';
+  el('editor').disabled = false;
+  el('save').disabled = true;
+  dirty = false;
+  el('saveState').textContent = '';
+}
+
+async function saveFile() {
+  if (!currentPath) return;
+  el('saveState').textContent = 'saving…';
+  var reply = await request('write', { path: currentPath, content: el('editor').value });
+  var body = reply.payload || {};
+  if (body.error) {
+    el('saveState').textContent = body.error;
+    return;
+  }
+  dirty = false;
+  el('save').disabled = true;
+  el('saveState').textContent = 'saved';
+  setTimeout(function () {
+    if (!dirty) el('saveState').textContent = '';
+  }, 2000);
+}
+
+// --------------------------------------------------------------- the protocol
+
+var decode = createDecoder(function (message) {
+  if (message.k === 'auth-ok') {
+    setStatus('connected to ' + (INVITE.host || 'the host'), true);
+    el('handshake').classList.add('hide');
+    el('tree').classList.remove('hide');
+    el('pane').classList.remove('hide');
+    refreshTree();
+    return;
+  }
+  if (message.k === 'auth-failed') {
+    setStatus('the host refused this invite', false);
+    return;
+  }
+  if (message.k === 'res') {
+    var resolve = waiting.get(message.id);
+    if (resolve) {
+      waiting.delete(message.id);
+      resolve(message);
+    }
+    return;
+  }
+  if (message.k === 'push') {
+    // The folder changed on the other side.
+    refreshTree();
+    if (message.payload && message.payload.path === currentPath && !dirty) openFile(currentPath);
+  }
+}, function (reason) {
+  setStatus('connection problem: ' + reason, false);
+});
+
+async function connect() {
+  pc = new RTCPeerConnection({ iceServers: (INVITE.stun || []).map(function (s) { return { urls: s }; }) });
+
+  pc.ondatachannel = function (event) {
+    channel = event.channel;
+    channel.binaryType = 'arraybuffer';
+    channel.onopen = function () {
+      setStatus('saying hello…', true);
+      send({ k: 'auth', code: INVITE.code, desktop: false, name: 'browser' });
+    };
+    channel.onmessage = function (message) {
+      var data = message.data;
+      decode(typeof data === 'string' ? data : new Uint8Array(data));
+    };
+    channel.onclose = function () { setStatus('the host closed the connection', false); };
+  };
+
+  pc.onconnectionstatechange = function () {
+    if (pc.connectionState === 'connecting') setStatus('connecting directly…', false);
+    if (pc.connectionState === 'failed') {
+      setStatus('could not reach the host directly — your network blocks it', false);
+      el('replyHint').textContent =
+        'Tell your friend the direct connection failed; they can switch HawCode to tunnel mode.';
+      el('handshake').classList.remove('hide');
+    }
+    if (pc.connectionState === 'connected') el('route').textContent = 'direct connection';
+  };
+
+  await pc.setRemoteDescription({ type: 'offer', sdp: INVITE.sdp });
+  var answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  await new Promise(function (resolve) {
+    if (pc.iceGatheringState === 'complete') { resolve(); return; }
+    var check = function () { if (pc.iceGatheringState === 'complete') resolve(); };
+    pc.addEventListener('icegatheringstatechange', check);
+    setTimeout(resolve, 6000);
+  });
+
+  var code = await encodeReply({ v: 1, t: 'answer', sdp: pc.localDescription.sdp });
+  el('reply').value = code;
+  el('copy').disabled = false;
+  setStatus('waiting for your friend to paste the reply code', false);
+}
+
+// ----------------------------------------------------------------------- boot
+
+el('copy').onclick = function () {
+  el('reply').select();
+  navigator.clipboard.writeText(el('reply').value).then(function () {
+    el('replyHint').textContent = 'Copied — now send it back.';
+  }, function () {
+    el('replyHint').textContent = 'Select the box above and copy it by hand.';
+  });
+};
+
+el('editor').oninput = function () {
+  dirty = true;
+  el('save').disabled = false;
+  el('saveState').textContent = 'unsaved';
+};
+
+el('save').onclick = saveFile;
+
+document.addEventListener('keydown', function (event) {
+  if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+    event.preventDefault();
+    if (!el('save').disabled) saveFile();
+  }
+});
+
+window.onbeforeunload = function () { return dirty ? 'You have unsaved changes.' : undefined; };
+
+if (INVITE && INVITE.sdp) {
+  el('folderName').textContent = INVITE.folder || 'the shared folder';
+  el('title').textContent = 'HawCode — ' + (INVITE.folder || 'shared folder');
+  connect().catch(function (error) { setStatus('could not start: ' + error.message, false); });
+} else {
+  setStatus('this invite file is damaged — ask for a new one', false);
+}
+</script>
+</body>
+</html>

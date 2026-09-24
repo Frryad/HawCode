@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to HawHost — Self-Hosted Server</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 1.25rem;
+      padding: 2.5rem;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 1.25rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+      color: #fff;
+    }
+
+    p {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+      text-align: left;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-box {
+      background: #0f172a;
+      padding: 1rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .info-label {
+      font-size: 0.7rem;
+      color: #64748b;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+
+    .info-val {
+      font-size: 0.9rem;
+      color: #38bdf8;
+      font-family: monospace;
+      font-weight: 600;
+      margin-top: 0.25rem;
+    }
+
+    .footer {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <div class="badge">● Server Live &amp; Online</div>
+    <h1>Welcome to HawHost</h1>
+    <p>This static website is being served directly from this Windows personal computer without any cloud proxies or
+      external tunnels.</p>
+
+    <div class="info-grid">
+      <div class="info-box">
+        <div class="info-label">Hosting Engine</div>
+        <div class="info-val">HawHost Windows 1.0</div>
+      </div>
+      <div class="info-box">
+        <div class="info-label">Web Server Mode</div>
+        <div class="info-val">Virtual Host (Direct)</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Configure your websites and domains in the HawHost desktop control panel.
+    </div>
+  </div>
+</body>
+
+</html>

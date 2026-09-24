@@ -1,0 +1,249 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>HawCode P2P</title></head>
+<body>
+<script>
+'use strict';
+
+/**
+ * The WebRTC engine, running in a hidden window because Electron's main process
+ * has no RTCPeerConnection. It holds one connection per friend and does no
+ * interpreting of what flows over them: frames arrive from main already
+ * encoded, and frames from the friend go straight back to main. All the
+ * authentication and file handling lives there, where it can be reasoned about
+ * in one place.
+ */
+
+var peers = new Map();
+// Give up waiting for stragglers; a candidate that slow will not be the one
+// that works anyway, and the user is sitting in front of a spinner.
+var GATHER_TIMEOUT_MS = 6000;
+var BUFFER_HIGH = 4 * 1024 * 1024;
+var BUFFER_LOW = 1 * 1024 * 1024;
+
+function toMain(type, payload) {
+  window.punch.send(type, payload);
+}
+
+function iceServers(stunServers) {
+  if (!Array.isArray(stunServers)) return [];
+  return stunServers
+    .map(function (entry) { return String(entry || '').trim(); })
+    .filter(Boolean)
+    .map(function (entry) {
+      return { urls: /^stuns?:/i.test(entry) ? entry : 'stun:' + entry };
+    });
+}
+
+/** Wait for ICE gathering to finish so the offer carries every candidate. */
+function gathered(pc) {
+  return new Promise(function (resolve) {
+    if (pc.iceGatheringState === 'complete') { resolve(); return; }
+    var done = false;
+    var finish = function () {
+      if (done) return;
+      done = true;
+      pc.removeEventListener('icegatheringstatechange', check);
+      resolve();
+    };
+    var check = function () {
+      if (pc.iceGatheringState === 'complete') finish();
+    };
+    pc.addEventListener('icegatheringstatechange', check);
+    setTimeout(finish, GATHER_TIMEOUT_MS);
+  });
+}
+
+/**
+ * Ask the connection what it actually settled on. "srflx" or "prflx" means the
+ * punch worked and bytes are flowing straight to the friend; "relay" would mean
+ * something in the middle, which this app never configures.
+ */
+async function describeRoute(pc) {
+  try {
+    var stats = await pc.getStats();
+    var pairId = null;
+    stats.forEach(function (report) {
+      if (report.type === 'transport' && report.selectedCandidatePairId) {
+        pairId = report.selectedCandidatePairId;
+      }
+    });
+    var pair = null;
+    stats.forEach(function (report) {
+      if (report.type !== 'candidate-pair') return;
+      if (pairId && report.id === pairId) pair = report;
+      else if (!pairId && !pair && report.state === 'succeeded' && report.nominated) pair = report;
+    });
+    if (!pair) return null;
+    var local = null;
+    var remote = null;
+    stats.forEach(function (report) {
+      if (report.id === pair.localCandidateId) local = report;
+      if (report.id === pair.remoteCandidateId) remote = report;
+    });
+    return {
+      localType: local ? local.candidateType : null,
+      remoteType: remote ? remote.candidateType : null,
+      remoteAddress: remote ? (remote.address || remote.ip || null) : null
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Drain the outbound queue while the channel has room. Without this a large
+ * file fills Chromium's send buffer and the connection is dropped.
+ */
+function flush(entry) {
+  if (!entry.channel || entry.channel.readyState !== 'open') return;
+  while (entry.queue.length && entry.channel.bufferedAmount < BUFFER_HIGH) {
+    var frame = entry.queue.shift();
+    try {
+      entry.channel.send(frame);
+    } catch (error) {
+      toMain('error', { peerId: entry.id, message: error.message });
+      return;
+    }
+  }
+}
+
+function wireChannel(peerId, entry, channel) {
+  entry.channel = channel;
+  channel.binaryType = 'arraybuffer';
+  channel.bufferedAmountLowThreshold = BUFFER_LOW;
+
+  channel.onopen = function () {
+    entry.open = true;
+    flush(entry);
+    // Report the open synchronously. Waiting on getStats() here would let the
+    // friend's first frame reach main before the link that must handle it
+    // exists, and their greeting would be dropped. The route follows after.
+    toMain('open', { peerId: peerId, route: null });
+    describeRoute(entry.pc).then(function (route) {
+      if (route) toMain('state', { peerId: peerId, state: 'connected', route: route });
+    });
+  };
+  channel.onmessage = function (event) {
+    var data = event.data;
+    toMain('message', {
+      peerId: peerId,
+      frame: typeof data === 'string' ? data : new Uint8Array(data)
+    });
+  };
+  channel.onclose = function () {
+    entry.open = false;
+    toMain('closed', { peerId: peerId, reason: 'channel-closed' });
+  };
+  channel.onbufferedamountlow = function () { flush(entry); };
+}
+
+function newPeer(peerId, stunServers) {
+  var pc = new RTCPeerConnection({
+    iceServers: iceServers(stunServers),
+    iceCandidatePoolSize: 2
+  });
+  var entry = { id: peerId, pc: pc, channel: null, queue: [], open: false };
+  peers.set(peerId, entry);
+
+  pc.onconnectionstatechange = async function () {
+    toMain('state', {
+      peerId: peerId,
+      state: pc.connectionState,
+      route: pc.connectionState === 'connected' ? await describeRoute(pc) : null
+    });
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      toMain('closed', { peerId: peerId, reason: pc.connectionState });
+    }
+  };
+
+  return entry;
+}
+
+async function createOffer(peerId, stunServers) {
+  var entry = newPeer(peerId, stunServers);
+  // The host always opens the channel, so the friend only has to answer.
+  wireChannel(peerId, entry, entry.pc.createDataChannel('hawcode', { ordered: true }));
+
+  var offer = await entry.pc.createOffer();
+  await entry.pc.setLocalDescription(offer);
+  await gathered(entry.pc);
+  toMain('offer', { peerId: peerId, sdp: entry.pc.localDescription.sdp });
+}
+
+/** The joining side: take the host's offer and produce the reply code. */
+async function createAnswer(peerId, remoteSdp, stunServers) {
+  var entry = newPeer(peerId, stunServers);
+  entry.pc.ondatachannel = function (event) {
+    wireChannel(peerId, entry, event.channel);
+  };
+
+  await entry.pc.setRemoteDescription({ type: 'offer', sdp: remoteSdp });
+  var answer = await entry.pc.createAnswer();
+  await entry.pc.setLocalDescription(answer);
+  await gathered(entry.pc);
+  toMain('answer', { peerId: peerId, sdp: entry.pc.localDescription.sdp });
+}
+
+async function acceptAnswer(peerId, sdp) {
+  var entry = peers.get(peerId);
+  if (!entry) {
+    toMain('error', { peerId: peerId, message: 'That invite is no longer waiting for a reply' });
+    return;
+  }
+  try {
+    await entry.pc.setRemoteDescription({ type: 'answer', sdp: sdp });
+  } catch (error) {
+    toMain('error', {
+      peerId: peerId,
+      message: 'The reply code does not match this invite: ' + error.message
+    });
+  }
+}
+
+function closePeer(peerId) {
+  var entry = peers.get(peerId);
+  if (!entry) return;
+  peers.delete(peerId);
+  try { if (entry.channel) entry.channel.close(); } catch (error) { /* already gone */ }
+  try { entry.pc.close(); } catch (error) { /* already gone */ }
+}
+
+window.punch.on(function (message) {
+  var payload = message.payload || {};
+  switch (message.type) {
+    case 'create-offer':
+      createOffer(payload.peerId, payload.stunServers).catch(function (error) {
+        toMain('error', { peerId: payload.peerId, message: error.message });
+      });
+      break;
+    case 'create-answer':
+      createAnswer(payload.peerId, payload.sdp, payload.stunServers).catch(function (error) {
+        toMain('error', { peerId: payload.peerId, message: error.message });
+      });
+      break;
+    case 'accept-answer':
+      acceptAnswer(payload.peerId, payload.sdp);
+      break;
+    case 'send': {
+      var entry = peers.get(payload.peerId);
+      if (!entry) break;
+      entry.queue.push(payload.frame);
+      flush(entry);
+      break;
+    }
+    case 'close':
+      closePeer(payload.peerId);
+      break;
+    case 'close-all':
+      Array.from(peers.keys()).forEach(closePeer);
+      break;
+    default:
+      break;
+  }
+});
+
+toMain('ready', {});
+</script>
+</body>
+</html>
